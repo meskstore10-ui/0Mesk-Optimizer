@@ -1,0 +1,550 @@
+$ErrorActionPreference = "Stop"
+
+$AppName = "Mesk Optimizer"
+$ExeName = "MeskOptimizer.exe"
+
+$ZipUrl = "https://github.com/meskstore10-ui/0Mesk-Optimizer/raw/refs/heads/main/MeskOptimizer.zip"
+
+function Test-Administrador {
+
+    $Identidade = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $Principal = New-Object System.Security.Principal.WindowsPrincipal($Identidade)
+
+    return $Principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+
+function Mostrar-Titulo {
+
+    Clear-Host
+
+    Write-Host ""
+    Write-Host "============================================" -ForegroundColor DarkMagenta
+    Write-Host "               MESK OPTIMIZER" -ForegroundColor Magenta
+    Write-Host "============================================" -ForegroundColor DarkMagenta
+    Write-Host ""
+}
+
+function Baixar-Zip {
+
+    param(
+        [string]$Destino
+    )
+
+    Write-Host "Conectando ao GitHub..." -ForegroundColor DarkGray
+    Write-Host "Baixando Mesk Optimizer..." -ForegroundColor Cyan
+    Write-Host ""
+
+    $Headers = @{
+        "User-Agent" = "MeskOptimizer"
+    }
+
+    Invoke-WebRequest `
+        -Uri $ZipUrl `
+        -OutFile $Destino `
+        -Headers $Headers `
+        -UseBasicParsing
+
+    if (-not (Test-Path $Destino)) {
+        throw "O arquivo não foi baixado."
+    }
+
+    $Tamanho = (Get-Item $Destino).Length
+
+    if ($Tamanho -lt 1024) {
+        throw "O ZIP baixado parece inválido ou incompleto."
+    }
+
+    Write-Host "Download concluído." -ForegroundColor Green
+}
+
+function Extrair-Zip {
+
+    param(
+        [string]$Zip,
+        [string]$Destino
+    )
+
+    Write-Host "Extraindo arquivos..." -ForegroundColor Cyan
+
+    New-Item `
+        -ItemType Directory `
+        -Path $Destino `
+        -Force | Out-Null
+
+    Expand-Archive `
+        -LiteralPath $Zip `
+        -DestinationPath $Destino `
+        -Force
+
+    Write-Host "Extração concluída." -ForegroundColor Green
+}
+
+function Localizar-Executavel {
+
+    param(
+        [string]$Pasta
+    )
+
+    Write-Host "Procurando $ExeName..." -ForegroundColor Cyan
+
+    $Executavel = Get-ChildItem `
+        -Path $Pasta `
+        -Recurse `
+        -File `
+        -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -ieq $ExeName
+        } |
+        Select-Object -First 1
+
+    if (-not $Executavel) {
+        throw "$ExeName não foi encontrado dentro do ZIP."
+    }
+
+    Write-Host "Executável encontrado." -ForegroundColor Green
+    Write-Host ""
+
+    return $Executavel
+}
+
+function Executar-Mesk {
+
+    $WorkDir = Join-Path `
+        $env:TEMP `
+        ("MeskOptimizer_" + [Guid]::NewGuid().ToString("N"))
+
+    $ZipPath = Join-Path $WorkDir "MeskOptimizer.zip"
+    $ExtractDir = Join-Path $WorkDir "MeskOptimizer"
+
+    try {
+
+        Mostrar-Titulo
+
+        Write-Host "Modo: EXECUTAR" -ForegroundColor Green
+        Write-Host ""
+
+        New-Item `
+            -ItemType Directory `
+            -Path $WorkDir `
+            -Force | Out-Null
+
+        Baixar-Zip -Destino $ZipPath
+
+        Write-Host ""
+
+        Extrair-Zip `
+            -Zip $ZipPath `
+            -Destino $ExtractDir
+
+        Write-Host ""
+
+        $Exe = Localizar-Executavel -Pasta $ExtractDir
+
+        Write-Host "Iniciando Mesk Optimizer..." -ForegroundColor Green
+        Write-Host ""
+
+        $Processo = Start-Process `
+            -FilePath $Exe.FullName `
+            -WorkingDirectory $Exe.Directory.FullName `
+            -Wait `
+            -PassThru
+
+        Write-Host ""
+        Write-Host "Mesk Optimizer encerrado." -ForegroundColor Green
+        Write-Host "Código de saída: $($Processo.ExitCode)" -ForegroundColor DarkGray
+
+    }
+    catch {
+
+        Write-Host ""
+        Write-Host "ERRO AO EXECUTAR" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+    }
+    finally {
+
+        if (Test-Path $WorkDir) {
+
+            Remove-Item `
+                -Path $WorkDir `
+                -Recurse `
+                -Force `
+                -ErrorAction SilentlyContinue
+        }
+    }
+
+    Write-Host ""
+    Read-Host "Pressione Enter para voltar ao menu"
+}
+
+function Criar-Atalho {
+
+    param(
+        [string]$Executavel,
+        [string]$Atalho
+    )
+
+    $PastaAtalho = Split-Path $Atalho -Parent
+
+    if (-not (Test-Path $PastaAtalho)) {
+
+        New-Item `
+            -ItemType Directory `
+            -Path $PastaAtalho `
+            -Force | Out-Null
+    }
+
+    $Shell = New-Object -ComObject WScript.Shell
+
+    $Shortcut = $Shell.CreateShortcut($Atalho)
+
+    $Shortcut.TargetPath = $Executavel
+    $Shortcut.WorkingDirectory = Split-Path $Executavel -Parent
+    $Shortcut.IconLocation = "$Executavel,0"
+    $Shortcut.Description = "Mesk Optimizer"
+
+    $Shortcut.Save()
+}
+
+function Iniciar-Instalacao-Elevada {
+
+    $Codigo = @'
+$ErrorActionPreference = "Stop"
+
+$AppName = "Mesk Optimizer"
+$ExeName = "MeskOptimizer.exe"
+
+$ZipUrl = "https://github.com/meskstore10-ui/0Mesk-Optimizer/raw/refs/heads/main/MeskOptimizer.zip"
+
+$InstallDir = Join-Path $env:ProgramFiles $AppName
+$InstallExe = Join-Path $InstallDir $ExeName
+
+$Desktop = [Environment]::GetFolderPath("Desktop")
+$DesktopShortcut = Join-Path $Desktop "$AppName.lnk"
+
+$StartMenu = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs"
+$StartMenuShortcut = Join-Path $StartMenu "$AppName.lnk"
+
+$WorkDir = Join-Path `
+    $env:TEMP `
+    ("MeskOptimizer_Install_" + [Guid]::NewGuid().ToString("N"))
+
+$ZipPath = Join-Path $WorkDir "MeskOptimizer.zip"
+$ExtractDir = Join-Path $WorkDir "MeskOptimizer"
+
+try {
+
+    Write-Host ""
+    Write-Host "============================================" -ForegroundColor DarkMagenta
+    Write-Host "       INSTALAÇÃO DO MESK OPTIMIZER" -ForegroundColor Magenta
+    Write-Host "============================================" -ForegroundColor DarkMagenta
+    Write-Host ""
+
+    New-Item `
+        -ItemType Directory `
+        -Path $ExtractDir `
+        -Force | Out-Null
+
+    Write-Host "Baixando Mesk Optimizer..." -ForegroundColor Cyan
+
+    $Headers = @{
+        "User-Agent" = "MeskOptimizer"
+    }
+
+    Invoke-WebRequest `
+        -Uri $ZipUrl `
+        -OutFile $ZipPath `
+        -Headers $Headers `
+        -UseBasicParsing
+
+    if (-not (Test-Path $ZipPath)) {
+        throw "Não foi possível baixar o ZIP."
+    }
+
+    Write-Host "Extraindo arquivos..." -ForegroundColor Cyan
+
+    Expand-Archive `
+        -LiteralPath $ZipPath `
+        -DestinationPath $ExtractDir `
+        -Force
+
+    Write-Host "Procurando MeskOptimizer.exe..." -ForegroundColor Cyan
+
+    $Exe = Get-ChildItem `
+        -Path $ExtractDir `
+        -Recurse `
+        -File `
+        -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -ieq $ExeName
+        } |
+        Select-Object -First 1
+
+    if (-not $Exe) {
+        throw "MeskOptimizer.exe não foi encontrado dentro do ZIP."
+    }
+
+    Write-Host "Executável encontrado." -ForegroundColor Green
+    Write-Host ""
+
+    if (Test-Path $InstallDir) {
+
+        Write-Host "Removendo instalação anterior..." -ForegroundColor Yellow
+
+        Get-Process `
+            -Name "MeskOptimizer" `
+            -ErrorAction SilentlyContinue |
+            Stop-Process `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+        Remove-Item `
+            -Path $InstallDir `
+            -Recurse `
+            -Force
+    }
+
+    New-Item `
+        -ItemType Directory `
+        -Path $InstallDir `
+        -Force | Out-Null
+
+    Write-Host "Instalando em:" -ForegroundColor Cyan
+    Write-Host $InstallDir -ForegroundColor DarkGray
+    Write-Host ""
+
+    Copy-Item `
+        -Path (Join-Path $Exe.Directory.FullName "*") `
+        -Destination $InstallDir `
+        -Recurse `
+        -Force
+
+    if (-not (Test-Path $InstallExe)) {
+        throw "MeskOptimizer.exe não foi encontrado após a instalação."
+    }
+
+    Write-Host "Criando atalho na Área de Trabalho..." -ForegroundColor Cyan
+
+    $Shell = New-Object -ComObject WScript.Shell
+
+    $Shortcut = $Shell.CreateShortcut($DesktopShortcut)
+
+    $Shortcut.TargetPath = $InstallExe
+    $Shortcut.WorkingDirectory = $InstallDir
+    $Shortcut.IconLocation = "$InstallExe,0"
+    $Shortcut.Description = "Mesk Optimizer"
+
+    $Shortcut.Save()
+
+    Write-Host "Criando atalho no Menu Iniciar..." -ForegroundColor Cyan
+
+    $ShortcutStart = $Shell.CreateShortcut($StartMenuShortcut)
+
+    $ShortcutStart.TargetPath = $InstallExe
+    $ShortcutStart.WorkingDirectory = $InstallDir
+    $ShortcutStart.IconLocation = "$InstallExe,0"
+    $ShortcutStart.Description = "Mesk Optimizer"
+
+    $ShortcutStart.Save()
+
+    Write-Host ""
+    Write-Host "============================================" -ForegroundColor DarkMagenta
+    Write-Host "          INSTALAÇÃO CONCLUÍDA" -ForegroundColor Green
+    Write-Host "============================================" -ForegroundColor DarkMagenta
+    Write-Host ""
+    Write-Host "Instalado em:" -ForegroundColor Gray
+    Write-Host $InstallExe
+    Write-Host ""
+    Write-Host "Atalho na Área de Trabalho criado." -ForegroundColor Green
+    Write-Host "Atalho no Menu Iniciar criado." -ForegroundColor Green
+    Write-Host ""
+
+}
+catch {
+
+    Write-Host ""
+    Write-Host "ERRO NA INSTALAÇÃO" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+}
+
+finally {
+
+    if (Test-Path $WorkDir) {
+
+        Remove-Item `
+            -Path $WorkDir `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+}
+
+Read-Host "Pressione Enter para fechar"
+'@
+
+    $Encoded = [Convert]::ToBase64String(
+        [Text.Encoding]::Unicode.GetBytes($Codigo)
+    )
+
+    Start-Process `
+        -FilePath "powershell.exe" `
+        -Verb RunAs `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $Encoded"
+}
+
+function Instalar-Mesk {
+
+    Write-Host ""
+    Write-Host "Solicitando permissão de administrador..." -ForegroundColor Yellow
+    Write-Host ""
+
+    Iniciar-Instalacao-Elevada
+}
+
+function Iniciar-Desinstalacao-Elevada {
+
+    $Codigo = @'
+$ErrorActionPreference = "Stop"
+
+$AppName = "Mesk Optimizer"
+
+$InstallDir = Join-Path $env:ProgramFiles $AppName
+
+$Desktop = [Environment]::GetFolderPath("Desktop")
+$DesktopShortcut = Join-Path $Desktop "$AppName.lnk"
+
+$StartMenu = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs"
+$StartMenuShortcut = Join-Path $StartMenu "$AppName.lnk"
+
+try {
+
+    Write-Host ""
+    Write-Host "============================================" -ForegroundColor DarkMagenta
+    Write-Host "      DESINSTALAÇÃO DO MESK OPTIMIZER" -ForegroundColor Magenta
+    Write-Host "============================================" -ForegroundColor DarkMagenta
+    Write-Host ""
+
+    Write-Host "Procurando programa em execução..." -ForegroundColor Cyan
+
+    Get-Process `
+        -Name "MeskOptimizer" `
+        -ErrorAction SilentlyContinue |
+        Stop-Process `
+        -Force `
+        -ErrorAction SilentlyContinue
+
+    Start-Sleep -Milliseconds 500
+
+    if (Test-Path $DesktopShortcut) {
+
+        Write-Host "Removendo atalho da Área de Trabalho..." -ForegroundColor Cyan
+
+        Remove-Item `
+            -Path $DesktopShortcut `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+
+    if (Test-Path $StartMenuShortcut) {
+
+        Write-Host "Removendo atalho do Menu Iniciar..." -ForegroundColor Cyan
+
+        Remove-Item `
+            -Path $StartMenuShortcut `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+
+    if (Test-Path $InstallDir) {
+
+        Write-Host "Removendo arquivos do programa..." -ForegroundColor Cyan
+
+        Remove-Item `
+            -Path $InstallDir `
+            -Recurse `
+            -Force
+    }
+    else {
+
+        Write-Host "A pasta de instalação não foi encontrada." -ForegroundColor Yellow
+    }
+
+    Write-Host ""
+    Write-Host "============================================" -ForegroundColor DarkMagenta
+    Write-Host "       DESINSTALAÇÃO CONCLUÍDA" -ForegroundColor Green
+    Write-Host "============================================" -ForegroundColor DarkMagenta
+    Write-Host ""
+    Write-Host "Mesk Optimizer foi removido do computador." -ForegroundColor Green
+    Write-Host ""
+
+}
+catch {
+
+    Write-Host ""
+    Write-Host "ERRO NA DESINSTALAÇÃO" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+}
+
+Read-Host "Pressione Enter para fechar"
+'@
+
+    $Encoded = [Convert]::ToBase64String(
+        [Text.Encoding]::Unicode.GetBytes($Codigo)
+    )
+
+    Start-Process `
+        -FilePath "powershell.exe" `
+        -Verb RunAs `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $Encoded"
+}
+
+function Desinstalar-Mesk {
+
+    Write-Host ""
+    Write-Host "Solicitando permissão de administrador..." -ForegroundColor Yellow
+    Write-Host ""
+
+    Iniciar-Desinstalacao-Elevada
+}
+
+while ($true) {
+
+    Mostrar-Titulo
+
+    Write-Host "[1] Executar"
+    Write-Host "[2] Instalar"
+    Write-Host "[3] Desinstalar"
+    Write-Host "[4] Sair"
+    Write-Host ""
+
+    $Opcao = Read-Host "Escolha"
+
+    switch ($Opcao) {
+
+        "1" {
+            Executar-Mesk
+        }
+
+        "2" {
+            Instalar-Mesk
+        }
+
+        "3" {
+            Desinstalar-Mesk
+        }
+
+        "4" {
+            Clear-Host
+            exit
+        }
+
+        default {
+            Write-Host ""
+            Write-Host "Opção inválida." -ForegroundColor Red
+            Start-Sleep -Seconds 2
+        }
+    }
+} 
